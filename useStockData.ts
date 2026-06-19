@@ -109,9 +109,6 @@ const apiClient = createApiClient();
 
 // ==================== API Service Functions ====================
 
-/**
- * Fetch historical stock data from backend
- */
 const fetchStockHistory = async (
   symbolToken: string,
   interval: string = 'DAILY'
@@ -138,9 +135,6 @@ const fetchStockHistory = async (
   }
 };
 
-/**
- * Fetch Gemini AI analysis for stock
- */
 const fetchStockAnalysis = async (
   symbol: string,
   metrics: StockMetrics,
@@ -166,9 +160,6 @@ const fetchStockAnalysis = async (
   }
 };
 
-/**
- * Retry logic with exponential backoff
- */
 const retryWithBackoff = async <T,>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
@@ -184,7 +175,6 @@ const retryWithBackoff = async <T,>(
       lastError = error instanceof Error ? error : new Error(String(error));
       console.warn(`⚠️ Attempt ${attempt} failed:`, lastError.message);
 
-      // Don't retry on client errors (4xx)
       if (axios.isAxiosError(error) && error.response?.status && error.response.status < 500) {
         throw error;
       }
@@ -210,7 +200,7 @@ interface CacheEntry<T> {
 class DataCache {
   private historyCache: Map<string, CacheEntry<StockHistoryData>> = new Map();
   private analysisCache: Map<string, CacheEntry<GeminiAnalysis>> = new Map();
-  private readonly TTL = 5 * 60 * 1000; // 5 minutes
+  private readonly TTL = 5 * 60 * 1000;
 
   getHistory(key: string): StockHistoryData | null {
     const entry = this.historyCache.get(key);
@@ -248,23 +238,7 @@ const cache = new DataCache();
 
 // ==================== Custom Hook: useStockData ====================
 
-/**
- * Custom React Hook for fetching and managing stock data
- *
- * @param initialSymbolToken - Initial stock token to fetch (optional)
- * @returns Object containing stock data, loading state, error state, and fetch functions
- *
- * @example
- * const { data, fetchStockData, loading, error } = useStockData('3045');
- *
- * // Fetch new stock
- * await fetchStockData('3046', '1W');
- *
- * // Refetch current stock
- * await refetch();
- */
 export const useStockData = (initialSymbolToken?: string): UseStockDataReturn => {
-  // State management
   const [state, setState] = useState<StockDataState>({
     symbol: initialSymbolToken || '',
     history: null,
@@ -276,12 +250,10 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
 
   const [timeframe, setTimeframeState] = useState('DAILY');
 
-  // Refs for cleanup and debouncing
   const abortControllerRef = useRef<AbortController | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -294,26 +266,18 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
     };
   }, []);
 
-  /**
-   * Clear error message
-   */
   const clearError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
-  /**
-   * Main function to fetch stock data
-   */
   const fetchStockData = useCallback(
     async (symbolToken: string, newTimeframe: string = 'DAILY') => {
-      // Cancel previous request if still pending
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
 
       abortControllerRef.current = new AbortController();
 
-      // Check if already loading same symbol
       if (state.symbol === symbolToken && state.loading) {
         console.log('⏸️  Already loading this stock');
         return;
@@ -331,7 +295,6 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
       try {
         console.log(`📊 Fetching data for ${symbolToken}...`);
 
-        // Check cache first
         const cacheKey = `${symbolToken}-${newTimeframe}`;
         const cachedHistory = cache.getHistory(cacheKey);
         const cachedAnalysis = cache.getAnalysis(symbolToken);
@@ -339,7 +302,6 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
         let history: StockHistoryData | null = cachedHistory;
         let analysis: GeminiAnalysis | null = cachedAnalysis;
 
-        // Fetch history if not cached
         if (!history) {
           history = await retryWithBackoff(
             () => fetchStockHistory(symbolToken, newTimeframe),
@@ -351,7 +313,6 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
           }
         }
 
-        // Fetch analysis if not cached
         if (!analysis && history) {
           const metrics: StockMetrics = {
             symbol: history.symbol,
@@ -369,7 +330,7 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
               fetchStockAnalysis(
                 symbolToken,
                 metrics,
-                history!.candles.slice(-30) // Last 30 candles for analysis
+                history!.candles.slice(-30)
               ),
             2,
             2000
@@ -380,7 +341,6 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
           }
         }
 
-        // Update state only if component is still mounted
         if (isMountedRef.current) {
           setState({
             symbol: symbolToken,
@@ -411,26 +371,18 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
     [state.symbol, state.loading]
   );
 
-  /**
-   * Refetch current stock data
-   */
   const refetch = useCallback(async () => {
     if (state.symbol) {
       await fetchStockData(state.symbol, timeframe);
     }
   }, [state.symbol, timeframe, fetchStockData]);
 
-  /**
-   * Update timeframe with debouncing
-   */
   const setTimeframe = useCallback(
     (newTimeframe: string) => {
-      // Clear existing debounce timer
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
 
-      // Debounce fetch by 300ms
       debounceTimerRef.current = setTimeout(() => {
         if (state.symbol) {
           fetchStockData(state.symbol, newTimeframe);
@@ -440,12 +392,11 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
     [state.symbol, fetchStockData]
   );
 
-  // Initial fetch if symbolToken provided
   useEffect(() => {
     if (initialSymbolToken && !state.history) {
       fetchStockData(initialSymbolToken, timeframe);
     }
-  }, []); // Only run on mount
+  }, []);
 
   return {
     data: state,
@@ -456,11 +407,6 @@ export const useStockData = (initialSymbolToken?: string): UseStockDataReturn =>
   };
 };
 
-// ==================== Helper Hooks ====================
-
-/**
- * Hook for debounced search input
- */
 export const useDebounce = <T,>(value: T, delay: number = 500): T => {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
@@ -475,15 +421,10 @@ export const useDebounce = <T,>(value: T, delay: number = 500): T => {
   return debouncedValue;
 };
 
-/**
- * Hook for API error handling with toast/notification
- */
 export const useErrorHandler = () => {
   const handleError = useCallback((error: string | null) => {
     if (error) {
-      console.error('📢 User notification:', error);
-      // TODO: Integration with toast notification library (e.g., react-toastify)
-      // toast.error(error);
+      console.error('📢 Error:', error);
     }
   }, []);
 
